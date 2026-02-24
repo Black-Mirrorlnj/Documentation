@@ -4,7 +4,6 @@
 Este é o Documento onde as principais regras do software estarão disponíveis,
 todas as regras e formas de funcionamento estão escritas abaixo.
 
-[role = left]
 === Introdução
 
 Este documento descreve os requisitos funcionais e não funcionais para o sistema ScoreSync, 
