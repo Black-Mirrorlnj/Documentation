@@ -3,7 +3,7 @@
 
 Este é o Documento onde as principais regras do software estarão disponíveis,
 todas as regras e formas de funcionamento estão escritas abaixo.
-
+[role = left]
 === Introdução
 
 Este documento descreve os requisitos funcionais e não funcionais para o sistema ScoreSync, 
@@ -23,6 +23,7 @@ permitindo que diferentes comunidades utilizem a mesma infraestrutura centraliza
 Por fim, o sistema também prioriza segurança e confiabilidade na transmissão das informações, utilizando protocolos seguros de comunicação e validação de dados. 
 Isso garante que as estatísticas armazenadas reflitam fielmente os eventos ocorridos no jogo, evitando inconsistências, manipulações indevidas ou perda de informações críticas.
 
+[role = left]
 == Visão Geral do Projeto
 
 Script de Servidor (Addon): Desenvolvido em GLua para monitorar eventos internos (kills, mortes, tempo de jogo). O addon roda no servidor de Garry's
@@ -34,7 +35,6 @@ Backend/API: Serviço web que recebe os payloads do addon, valida autenticação
  armazenamento adequado. A API expõe endpoints REST/JSON para ingestão de eventos, criação/encerramento de partidas, consulta de estatísticas,
  geração de relatórios e administração de servidores/addons. O backend implementa validação de esquema, idempotência dos eventos (via `eventId`), 
  
-
 Fluxo de Dados e Integração: O fluxo típico é: addon -> HTTP POST -> API (autentica/valida) -> fila de processamento ->
  persistência/aggregate -> serviço de consulta/dashboard. Eventos podem ser enviados individualmente ou em lotes; 
  recomenda-se uso de cabeçalho `Authorization: Bearer <token>` e campo `eventId` para controle de duplicidade. A API deve retornar 
