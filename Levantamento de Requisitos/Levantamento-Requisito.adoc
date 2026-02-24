@@ -10,6 +10,16 @@ um software projetado para capturar, sincronizar e exibir estatísticas de
 jogadores em servidores de Garry’s Mod. O objetivo é fornecer aos administradores e 
 jogadores uma plataforma centralizada para consulta de desempenho.
 
+
+
+O ScoreSync surge da necessidade de oferecer maior transparência e competitividade dentro dos servidores, permitindo que dados de desempenho sejam armazenados de forma persistente e segura. Atualmente, muitos servidores dependem apenas de sistemas locais e temporários de pontuação, o que limita a análise histórica e comparativa entre partidas
+
+Além disso, o sistema busca padronizar a coleta de métricas relevantes, garantindo consistência nas informações registradas independentemente do modo de jogo utilizado. Dessa forma, torna-se possível implementar rankings globais, estatísticas detalhadas e indicadores de desempenho que incentivem o engajamento da comunidade.
+
+Outro aspecto importante do projeto é a escalabilidade. O ScoreSync foi concebido para suportar múltiplos servidores simultaneamente, permitindo que diferentes comunidades utilizem a mesma infraestrutura centralizada sem comprometer desempenho ou integridade dos dados.
+
+Por fim, o sistema também prioriza segurança e confiabilidade na transmissão das informações, utilizando protocolos seguros de comunicação e validação de dados. Isso garante que as estatísticas armazenadas reflitam fielmente os eventos ocorridos no jogo, evitando inconsistências, manipulações indevidas ou perda de informações críticas.
+
 == Visão Geral do Projeto
 
 Script de Servidor (Addon): Desenvolvido em GLua para monitorar eventos internos 
