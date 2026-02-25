@@ -1,0 +1,221 @@
+[role = left]
+=== Documentação de Levantamento de Requisitos 
+
+Este é o Documento onde as principais regras do software estarão disponíveis,
+todas as regras e formas de funcionamento estão escritas abaixo.
+[role = left]
+=== Introdução
+
+Este documento descreve os requisitos funcionais e não funcionais para o sistema ScoreSync, 
+um software projetado para capturar, sincronizar e exibir estatísticas de 
+jogadores em servidores de Garry’s Mod. O objetivo é fornecer aos administradores e 
+jogadores uma plataforma centralizada para consulta de desempenho.
+
+O ScoreSync surge da necessidade de oferecer maior transparência e competitividade dentro dos servidores, permitindo que dados de desempenho sejam armazenados de forma persistente e segura. 
+Atualmente, muitos servidores dependem apenas de sistemas locais e temporários de pontuação, o que limita a análise histórica e comparativa entre partidas
+
+Além disso, o sistema busca padronizar a coleta de métricas relevantes, garantindo consistência nas informações registradas independentemente do modo de jogo utilizado. 
+Dessa forma, torna-se possível implementar rankings globais, estatísticas detalhadas e indicadores de desempenho que incentivem o engajamento da comunidade.
+
+Outro aspecto importante do projeto é a escalabilidade. O ScoreSync foi concebido para suportar múltiplos servidores simultaneamente, 
+permitindo que diferentes comunidades utilizem a mesma infraestrutura centralizada sem comprometer desempenho ou integridade dos dados.
+
+Por fim, o sistema também prioriza segurança e confiabilidade na transmissão das informações, utilizando protocolos seguros de comunicação e validação de dados. 
+Isso garante que as estatísticas armazenadas reflitam fielmente os eventos ocorridos no jogo, evitando inconsistências, manipulações indevidas ou perda de informações críticas.
+
+[role = left]
+== Visão Geral do Projeto
+
+Script de Servidor (Addon): Desenvolvido em GLua para monitorar eventos internos (kills, mortes, tempo de jogo). O addon roda no servidor de Garry's
+ Mod e é responsável por interceptar hooks relevantes (ex.: `PlayerDeath`, `PlayerConnect`, `PlayerDisconnect`), coletar metadados 
+ (SteamID, arma, timestamp, posição opcional) e enviar eventos padronizados à backend via HTTP(S). Deve suportar configuração de chave de API, 
+ endpoint e políticas de retry/offline buffering para evitar perda de dados em picos ou quedas de conectividade.
+
+Backend/API: Serviço web que recebe os payloads do addon, valida autenticação e persiste eventos em banco de dados relacional (MySQL) ou outro
+ armazenamento adequado. A API expõe endpoints REST/JSON para ingestão de eventos, criação/encerramento de partidas, consulta de estatísticas,
+ geração de relatórios e administração de servidores/addons. O backend implementa validação de esquema, idempotência dos eventos (via `eventId`), 
+ 
+Fluxo de Dados e Integração: O fluxo típico é: addon -> HTTP POST -> API (autentica/valida) -> fila de processamento ->
+ persistência/aggregate -> serviço de consulta/dashboard. Eventos podem ser enviados individualmente ou em lotes; 
+ recomenda-se uso de cabeçalho `Authorization: Bearer <token>` e campo `eventId` para controle de duplicidade. A API deve retornar 
+ códigos HTTP apropriados (200/201 para sucesso, 4xx para erros do cliente, 5xx para falhas do servidor) e mensagens padronizadas para 
+ facilitar tratamento no addon.
+
+Banco de Dados: Preferência por MySQL  para dados transacionais e agregações; soluções NoSQL podem ser adotadas para métricas com alta taxa de 
+escrita. Estrutura básica sugerida: tabelas `servers`, `matches`, `players`, `events`, `aggregates`. Definir políticas de retenção, 
+arquivamento e índices para consultas frequentes (por SteamID, matchId, tempo).
+
+Confiabilidade e Escalabilidade(Futuro): Implementar retry com backoff no addon, filas (ex.: RabbitMQ, Redis Streams) no backend para desacoplar 
+ingestão de processamento, e estratégias de replicação/sharding no banco conforme necessidade. Monitoramento (logs estruturados, 
+métricas Prometheus, tracing) e alertas são obrigatórios para detectar perda de eventos, latência ou falhas de autenticação.
+
+Segurança e Privacidade(Desejável): Usar HTTPS, tokens rotativos ou chaves seguras, e armazenamento protegido de segredos (vault). 
+Aplicar rate limiting por servidor/addon, validação de payloads e mascaramento de dados sensíveis nos logs. Considerar 
+requisitos de privacidade ao armazenar ou expor SteamIDs e dados pessoais.
+
+Exemplo de payload (simplificado):
+
+----
+{ "eventId": "uuid-v4", "matchId": "1234", "type": "kill", "killerId": "7656119...", "victimId": "7656119...", 
+"weapon": "rifle", "timestamp": "2026-02-24T10:00:00Z" }
+----
+
+[role = left]
+=== Convenções, termos e abreviações
+
+GMod: Garry’s Mod.
+
+GLua: Linguagem de script (Lua) customizada para o motor Source.
+
+API: Interface de Programação de Aplicações que fará a ponte entre o jogo e o banco de dados.
+
+RF: Requisito Funcional.
+
+RNF: Requisito Não Funcional.
+
+[role = left]
+=== Requisitos Funcionais:
+
+* *[RF001] – Captura de evento de morte (kill/death) em tempo real*
+  ** *Ator:* Addon
+  ** *Prioridade:* Backbone
+  ** *Entradas e pré-condições:* O hook `PlayerDeath´ aparece logo após a sua ação.O addon extrai o SteamID do atacante e da vítima,
+  a arma utilizada e o timestamp. Irá ter uma partida ativa com ID válido e a chave de API configurada no addon. Irá ser Validado que os SteamIDs
+  estejam no formato SteamID64 e que não sejam bots
+  ** *Saídas e pós-condições:* Um objeto JSON com [matchId, killerId, victimId, weapon, timestamp] é gerado. O payload será enviado  com `http.Post`
+  para a API como o header da autenticação da partida. A API com um comando irá responder: ´200 OK´ e insere um registro no banco de dados,
+  atualizando estatísticas agregadas. Em caso de falha de conexão ou autenticação, o addon irá afazer reenvios e mensagens de erro no leaderboard.
+
+* *[RF002] – Sincronização em tempo real de pontuação após rounds*
+  ** *Ator:* Addon
+  ** *Prioridade:* Backbone
+  ** *Entradas e pré-condições:* Acontecerá quando ocorrer a finalização de um round ou evento relevante no jogo e com isso a conexão HTTP
+  disponível ao servidor da API e token válido. O addon possui os dados de kills, deaths e tempo jogado dos jogadores no leaderboard.
+  ** *Saídas e pós-condições:* O payload é transmitido para a API e a resposta ´200´ confirma a gravação com o status de sincronização
+  sendo atualizado no addon/UI de administração. Se não houver registro para um SteamID consultado, irá voltar ou retornar uma mensagem 
+  “Nenhum dado encontrado” junto com erros resultam em código 4xx/5xx e logs apropriados são gerados.
+
+* *[RF003] – Consulta de estatísticas de um jogador*
+  ** *Ator:* Jogador ou Admin via painel web
+  ** *Prioridade:* Core.
+  ** *Entradas e pré-condições:* Terá um campo de busca preenchido com SteamID ou nickname. O usuário autenticado com token JWT será válido
+  para acessar dados e será consultado os dados de performance (kills, deaths, tempo) armazenados no banco de dados(MySQL).
+  ** *Saídas e pós-condições:* Terá a exibição de tabela com as métricas do jogador no app ou dashboard. Mensagem de “Nenhum dado encontrado”
+  caso o SteamID não exista ou caso em falha de banco de dados, usuário vê uma mensagem genérica e o erro é registrado.
+
+* *[RF004] – Geração de relatório por partida*
+  ** *Ator:* Admin
+  ** *Prioridade:* Core
+  ** *Entradas e pré-condições:* Terá um identificador único de cada partida (matchId). Partida quando encerrada, os dados serão consolidados
+  no banco de dados.
+  ** *Saídas e pós-condições:* O relatório em formato JSON/tabela listando jogadores e suas estatísticas. As stats pode ser baixado ou visualizado
+  na interface. Os logs de geração de relatório e retornos de sucesso ou erro.
+
+* *[RF005] – Autenticação do addon na API*
+  ** *Ator:* Sistema (API)
+  ** *Prioridade:* Backbone
+  ** *Entradas e pré-condições:* Uma chave ou token enviado no cabeçalho Authorization de cada requisição. A API deve validar a chave contra
+  tabela de add-ons registrados.
+  ** *Saídas e pós-condições:* Se válido, acesso autorizado e o request é processado, senao retorno 401 Unauthorized e log de tentativa.
+  
+ * *[RF006] – Cadastro de servidor de jogo*
+  ** *Ator:* Admin
+  ** *Prioridade:* Backbone
+  ** *Entradas e pré-condições:* Formulário de cadastro contendo `serverName`, `ip`, `port`, `rconKey` (opcional) e `SteamID`. O usuário autenticado
+  com permissão do administrador para registrar servidores. Verificação de que o IP/porta não estão já cadastrados.
+  ** *Saídas e pós-condições:* Registro do servidor criado na tabela `servers` com um `serverId` único. Retorno de ´201 Created´ com o `serverId`
+  e informações básicas do servidor e logs de auditoria com o usuário responsável pelo cadastro.
+
+* *[RF007] – Criação e vinculação de partida (match lifecycle)*
+  ** *Ator:* Addon
+  ** *Prioridade:* Core
+  ** *Entradas e pré-condições:* Requisição de início de partida contendo `serverId`, `map`, `mode` e timestamp de início e o servidor deve estar
+  previamente cadastrado e ativo.
+  ** *Saídas e pós-condições:* Geração de `matchId` único e estado da partida definido como `in_progress`. Resposta contendo `matchId` para o addon
+  usar nos eventos subsequentes e logs de criação e vínculo entre servidor e partida.
+
+* *[RF008] – Registro e atualização de tempo de jogo (playtime)*
+  ** *Ator:* Addon
+  ** *Prioridade:* Core
+  ** *Entradas e pré-condições:* Eventos periódicos ou por desconexão contendo `steamId` e `playTimeDelta`.O jogador
+  deve ter SteamID válido e estar associado a um `matchId` quando aplicável.
+  ** *Saídas e pós-condições:* Atualização do acumulado de tempo de jogo do jogador no banco .Em caso de desconexão inesperada, gravação de
+  checkpoint para evitar perda de dados e logs de atualizações e alertas se deltas inconsistentes.
+
+* *[RF009] – Ajuste manual de pontuação por administrador*
+  ** *Ator:* Admin
+  ** *Prioridade:* Core
+  ** *Entradas e pré-condições:* Requisição autenticada com `playerSteamId`, `matchId`, `deltaPoints` e `motivo` para ajuste. Usuário deve possuir
+  permissão administrativa para modificar pontuações.
+  ** *Saídas e pós-condições:* Pontuação do jogador alterada conforme `deltaPoints` e nova média recalculada quando aplicável. Registro de auditoria contendo
+   `who`, `when`, `why` e `before/after` dos valores. Notificação opcional ao jogador afetado.
+
+* *[RF010] – Detecção de anomalias / prevenção de fraudes*
+  ** *Ator:* Sistema
+  ** *Prioridade:* Core
+  ** *Entradas e pré-condições:* Streams(Void) de eventos (kills, conexões, tempo) para análise em tempo real ou batch.Regras configuráveis 
+  (ex.: killstreaks impossíveis, múltiplos logins simultâneos).
+  ** *Saídas e pós-condições:* Sinalização de eventos suspeitos com `flagReason` e score de confiança. Ações automáticas possíveis: colocar jogador
+   em `restricted` ou bloquear uploads do addon temporariamente e logs e dashboard de incidentes para revisão manual.
+
+* *[RF011] – Exportação de dados (CSV/JSON) para análise externa*
+  ** *Ator:* Administrador / Analista
+  ** *Prioridade:* Edge
+  ** *Entradas e pré-condições:* Parâmetros de filtro (intervalo de datas, matchId, serverId, playerSteamId) e formato desejado 
+  (`csv` ou `json`) e o usuário autenticado com permissão de exportação.
+  ** *Saídas e pós-condições:* Uma geração de arquivo exportável disponível para download ou enviada por email/URL seguro. Registro do pedido de
+   exportação e métricas de uso.
+
+* *[RF012] – Notificações e webhooks no fim de partida*
+  ** *Ator:* Sistema
+  ** *Prioridade:* Edge
+  ** *Entradas e pré-condições:* Configuração de webhook com `callbackUrl`, `secret` e eventos assinados. Partida definida como `finished`
+   com dados consolidados.
+  ** *Saídas e pós-condições:* Envio de POST HTTP para os webhooks registrados com assinatura HMAC do payload. Tentativas de retry em caso de
+  falha e registros de entregas/erros. Possibilidade de desabilitar webhooks pelo administrador.
+
+[role = left]
+=== Referências
+
+Wiki Oficial do Garry's Mod (Facepunch)
+
+Documentação da API Steam Web
+
+Padrões de Documentação IEEE 830 para Requisitos de Software
+
+[role = left]
+=== Descrição geral do sistema:
+
+O sistema funcionará como um ecossistema onde o servidor de Garry's Mod 
+atua como o emissor de dados. Sempre que um evento relevante ocorrer 
+(ex: o fim de uma rodada no modo MM ou TDM), o addon enviará um payload 
+JSON para o servidor web.
+
+Evento no Jogo: Jogador elimina outro.
+
+Hook (Gancho): O script GLua intercepta o evento PlayerDeath.
+
+Processamento: O script verifica os SteamIDs envolvidos.
+
+Sincronização: Uma requisição http.Post é enviada à API.
+
+Armazenamento: A API valida a chave e salva os dados no banco (MySQL/PostgreSQL).
+
+[role = left]
+=== Descrição dos usuários:
+
+Jogadores
+Querem ver suas estatísticas (kills, deaths, tempo jogado, ranking), comparar com amigos e se sentir reconhecidos.
+
+Administradores do servidor
+Precisam monitorar desempenho da comunidade, detectar trapaceiros, ajustar pontuações quando necessário e gerar relatórios de partidas.
+
+Moderadores
+Ajudam a revisar denúncias e checar perfis suspeitos usando os dados do sistema.
+
+Visitantes / Público geral
+Olham leaderboards públicos para conhecer o servidor antes de entrar.
+
+
+
+
