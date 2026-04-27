@@ -349,4 +349,3 @@ O banco `gmod` é criado em MySQL com:
 
 ---
 
-*Documentação gerada para o projeto Black Mirror — Back-End Garry's Mod Score API*
